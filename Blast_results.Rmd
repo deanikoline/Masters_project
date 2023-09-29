@@ -1,0 +1,211 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-09-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library("readxl")
+```
+
+
+```{r}
+setwd("C:/Users/deani/Desktop/Speciale")
+getwd()
+```
+
+```{r}
+result <- read_tsv("ASV_1_blastres_all.tsv", col_names = F)
+head(result)
+```
+
+```{r}
+df <- result %>% rename(query_ID = X1, target_ID = X2, identity = X3, length = X4, mismatch = X5, gap_openings = X6, query_start = X7, query_end = X8, target_start = X9, target_end = X10, E_value = X11, bit_score = X12)
+head(df)
+```
+
+```{r}
+df <- df %>% mutate(strain = str_extract(target_ID, pattern = "22.*-[0-9]{1,2}"))
+df <- df %>% relocate (E_value) %>% relocate(bit_score) %>% relocate(identity) %>% relocate(strain)
+head(df)
+```
+
+```{r}
+dfu <- df %>% distinct(strain, .keep_all = TRUE)
+dfu2 <- df %>% distinct(strain, identity, .keep_all = TRUE)
+df
+dfu
+dfu2
+```
+
+```{r}
+df %>% filter(strain == "22S1L9-1")
+```
+
+
+
+```{r}
+sum(dfu$identity == 100)
+sum(dfu2$identity == 100)
+sum(df$identity == 100)
+```
+```{r}
+print(paste("Hits with E-val < 10:", dim(df)[1]))
+print(paste(">97% identity:", sum(df$identity > 97)))
+print(paste("100% identity:", sum(df$identity == 100)))
+```
+```{r}
+print(paste("Hits with E-val < 10:", dim(dfu)[1]))
+print(paste(">97% identity:", sum(dfu$identity > 97)))
+print(paste("100% identity:", sum(dfu$identity == 100)))
+```
+
+```{r}
+p <- ggplot(dfu, aes(x=identity)) + geom_histogram(binwidth=0.5, fill = 'red', color = "black") + scale_x_reverse() + labs(x ='% Identity', y='Number of hits', title = 'ASV_1 BLAST against strain collection genomes (dereplicated)')
+p
+
+p1 <- ggplot(df, aes(x=identity)) + geom_histogram(binwidth=0.5, fill = 'grey', color = "white") + scale_x_reverse()  + labs(x ='% Identity', y='Number of hits', title = 'ASV_1 BLAST against strain collection genomes')
+p1
+```
+
+Gtdbtk classify output
+
+```{r}
+tax <- read_tsv("gtdbtk.bac120.summary.tsv", col_names = TRUE)
+tax
+```
+
+```{r}
+t <- c("domain", "phylum", "class", "order", "family", "genus", "species")
+taxon <- tax %>% select(user_genome, classification) %>% separate(classification, into = t, sep = ";") %>% rename("strain" = "user_genome")
+taxon
+```
+
+```{r}
+taxon_dropna <- drop_na(taxon)
+print(paste("Strains in total:", dim(taxon)[1]))
+print(paste("Assigned to some level of taxonomy:", dim(taxon_dropna)[1]))
+print(paste("Assigned to genus level:", sum(taxon_dropna$genus != "g__")))
+print(paste("Assigned to species level:", sum(taxon_dropna$species != "s__")))
+```
+```{r}
+sphing <- sum(taxon_dropna$genus == "g__Sphingomonas")
+not_sphing <- sum(taxon_dropna$genus != "g__Sphingomonas")
+
+sphing
+sphing/not_sphing
+```
+
+
+```{r}
+p2 <- ggplot(data=taxon, aes(x=genus, fill=species)) + geom_bar(stat="count", color = "black") + theme(legend.position="none") + theme(axis.text.x = element_text(angle = -70, hjust = 0)) + labs(x ='Genus', y='Counts', title = 'Taxonomy of the strain collection, coloured by species')
+
+#taxon_sort <-       # sorter så kun mest almindelige genus kommer med
+#p2.1 <- ggplot(data=taxon, aes(x=genus, fill=species)) + geom_bar(stat="count", color = "black") + theme(legend.position="none") + theme(axis.text.x = element_text(angle = -90, hjust = 0)) + labs(x ='Genus', y='Counts', title = 'Taxonomy of the strain collection, coloured by species')
+
+p2
+#p2.1
+```
+
+
+
+```{r}
+ndf <- left_join(dfu, taxon, by="strain")
+ndf
+```
+
+```{r}
+p3 <- ggplot(ndf, aes(x=identity, fill=genus)) + geom_histogram(binwidth=1, color = "black") + scale_x_reverse() + labs(x ='% Identity', y='Number of hits', title = 'ASV_1 BLAST coloured by genus')
+p3
+
+p3.2 <- ggplot(data=ndf, aes(x=mismatch, fill=genus)) +
+  geom_bar(stat="count")
+p3.2
+```
+
+
+```{r}
+p4 <- ggplot(ndf, aes(x=identity, fill=species)) + geom_histogram(binwidth=0.5, color = "black") + scale_x_reverse() + labs(x ='% Identity', y='Number of hits', title = 'ASV_1 BLAST coloured by species') + xlim(101,90)
+p4
+
+p4.2 <- ggplot(data=ndf, aes(x=mismatch, fill=species)) +
+  geom_bar(stat="count") + xlim(-1,20)
+p4.2
+```
+
+```{r}
+sphingos <- filter(taxon, genus == "g__Sphingomonas") %>% mutate(file = paste0(strain, ".fasta")) %>% select(file)
+sphingos
+write.table(sphingos, file = "sphingomonads.txt", sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE)
+```
+```{r}
+ndf100 <- ndf %>% filter(identity == 100) %>% mutate(file = paste0(strain, ".fasta"))
+ndf100_list <- ndf100  %>% select(file)
+write.table(ndf100_list, file = "no_mismatch_hits.txt", sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE)
+```
+
+
+```{r}
+info <- read_excel("Overview_of_all_isolates_2022.xlsx")
+info <- info %>% rename(genome_size=`Genome size (Mb)`, strain=Strain, N50_reads=`N50 reads`, coverage=`Avg cov`, ONT_bc=`ONT bc`, DNA_conc=`DNA conc. used in lib (ng/µl)`, read_counts=`Read counts`, filtered_data=`Filtered_data (Mb)`, median_reads = `Median reads (bp)`, mean_reads = `Mean reads (bp)`, read_len_stdev = `Read Len. stdev`, N50_assembly=`N50 assembly (bp)`, lineage=`Lineage (tentative)`) %>% filter(!is.na(genome_size))
+info
+```
+
+
+```{r}
+ndf100 <- left_join(ndf100,info, by="strain")
+ndf100
+```
+```{r}
+ndf100 <- ndf100 %>% mutate(genomesize = case_when(genome_size < 15 ~ genome_size*1000000, genome_size > 15 ~ genome_size))
+ndf100$genome_size
+ndf100$genomesize
+```
+
+
+```{r}
+filtered <- ndf100 %>% filter(Contigs <= 10) %>% filter(coverage > 20) %>% filter(N50_assembly > 50000) %>% arrange(desc(coverage))
+sum(filtered$Contigs)
+filtered
+
+```
+
+```{r}
+filtered_list <- filtered %>% mutate(file = paste0(strain, ".fasta")) %>% select(file)
+write.table(filtered_list, file = "filtered.txt", sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE)
+```
+
+
+
+```{r}
+index <- read.table("index.tsv", header = FALSE)
+
+n <- c("contig", "contig_nr", "strain")
+index <- index %>% separate(V1, into = n, sep = "_") %>% rename(contig_length = V2) %>% select(contig_nr, strain, contig_length)
+index
+```
+
+```{r}
+index <- index %>% arrange(desc(contig_length)) %>% distinct(strain, .keep_all = TRUE) %>% rename(longest_contig = contig_length)
+index
+```
+
+
+```{r}
+ndf100 <- left_join(ndf100,index, by="strain") %>% 
+ndf100
+```
+
+```{r}
+ndf100 %>% filter(Contigs <= 10) %>% filter(coverage > 20) %>% filter(N50_assembly > 50000) %>% filter(longest_contig>3000000)
+```
+
+
+
