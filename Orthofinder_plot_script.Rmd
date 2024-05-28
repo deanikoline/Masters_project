@@ -1,0 +1,279 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-04-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(ggtree)
+library(patchwork)
+```
+
+
+```{r}
+setwd("C:/Users/deani/Desktop/Specialeprojekt")
+
+orthogrps <- read_tsv("N0.tsv")
+
+tree<- read.tree("new_genome_tree.nwk")
+tree$tip.label <- sub(".ffn", "", tree$tip.label)
+
+#clusters <- read.csv("mge-P5_results.csv") %>% mutate_at(vars(Standard_Cluster), ~ ifelse(. == -1, NA, .)) %>% select(Sample_Name, Standard_Cluster) %>% dplyr::rename(Plasmid = Sample_Name) %>% mutate(Standard_Cluster = as.numeric(Standard_Cluster))
+#clusters$Plasmid <- gsub("_reoriented", "", clusters$Plasmid)
+```
+
+
+
+
+
+```{r}
+countdf <- orthogrps %>%
+  dplyr::select(!c("OG", "Gene Tree Parent Clade")) %>%
+  mutate_at(vars(-(1)), ~ ifelse(is.na(.), 0, str_count(., ",")+1)) %>%
+  mutate(sumrow = rowSums(across(where(is.numeric)))) %>%
+  arrange(dplyr::desc(sumrow)) %>%
+  dplyr::select(!sumrow)
+
+binarydf <- orthogrps %>%
+  dplyr::select(!c("OG", "Gene Tree Parent Clade")) %>%
+  mutate_at(vars(-(1)), ~ ifelse(is.na(.), 0, 1)) %>%
+  mutate(sumrow = rowSums(across(where(is.numeric)))) %>%
+  arrange(dplyr::desc(sumrow)) %>%
+  dplyr::select(!sumrow)
+```
+
+```{r}
+count_matrix <- as.matrix(countdf %>% dplyr::select(!HOG))
+clust <- hclust(dist(t(count_matrix)))
+
+x <- as.data.frame(clust$labels)
+x["nr"] <- as.integer(rownames(x))
+colnames(x) <- c("strain", "nr")
+
+y <- as.data.frame(clust$order)
+colnames(y) <- c("nr")
+
+z <- left_join(y, x, by="nr")
+z$strain <- sub("_bakta", "", z$strain)
+```
+
+```{r}
+d=fortify(tree)
+dd = subset(d, isTip)
+taxonomy <- data.frame(dd$label[order(dd$y, decreasing=TRUE)])
+names(taxonomy) <- "order"
+```
+
+
+
+
+```{r}
+long_binarydf <- binarydf %>% pivot_longer(cols = !HOG, names_to = "strain", values_to = "X")
+
+long_binarydf$strain <- gsub("_bakta", "", long_binarydf$strain)
+
+long_binarydf$strain <- factor(long_binarydf$strain, levels = unique(taxonomy$order))
+long_binarydf$strain <- fct_rev(long_binarydf$strain)
+
+long_binarydf$HOG <- factor(long_binarydf$HOG, levels = unique(binarydf$HOG))
+long_binarydf$X <- as.factor(long_binarydf$X)
+
+# order by clustering: long_binarydf$strain <- factor(long_binarydf$strain, levels = unique(z$strain))
+```
+
+```{r}
+tax <- read.table("C:/Users/deani/Desktop/Specialeprojekt/gtdbtk.bac120.summary.tsv", header = T, sep = "\t") %>% separate(classification, into = c("rest", "species"), sep = "s__") %>% dplyr::select(user_genome, species)
+
+species2 <- data.frame(tree$tip.label)
+names(species2) <- "user_genome"
+
+species2 <-left_join(species2, tax, by="user_genome")
+species2$user_genome <- factor(species2$user_genome, levels = unique(taxonomy$order))
+species2$user_genome <- fct_rev(species2$user_genome)
+```
+
+
+
+```{r}
+p01 <- ggplot(long_binarydf, aes(x=HOG, y=strain, fill=X)) +
+  geom_tile() +
+  scale_fill_manual(values = c("white", "darkblue")) +
+  theme_void() +
+  theme(legend.position = "none")
+```
+
+```{r}
+species3 <- species2 %>% separate(species, into=c("genus", "species"), sep=" ")
+```
+
+
+```{r}
+p02 <- ggplot(species3, aes(x="1", y=user_genome, fill=species)) +
+  geom_tile(width=.1) +
+  theme_void() +
+  theme(legend.position = "right") +
+  scale_fill_viridis_d(option="D", name="Species", na.value="grey95")
+
+p02_1 <- ggplot(species3, aes(x="1", y=user_genome, fill=species)) +
+  geom_tile(width=.1) +
+  theme_void() +
+  theme(legend.position = "none") +
+  scale_fill_viridis_d(option="D", name="Species", na.value="grey95")
+
+
+#scale_fill_manual(values = c("red", "blue", "forestgreen", "orange", "purple", "grey95"), breaks = c("Sphingomonas aerolata", "Sphingomonas aurantiaca", "Sphingomonas sp001421535", "Sphingomonas sp004340945", "Sphingomonas sp001421745", ""), labels = c("Sphingomonas aerolata", "Sphingomonas aurantiaca", "Sphingomonas sp001421535", "Sphingomonas sp004340945", "Sphingomonas sp001421745", "NA"))
+```
+
+```{r}
+p03 <- ggtree(tree)
+```
+```{r}
+p03 + p02_1 + p01 + plot_layout(widths = c(1,2,7))
+```
+
+```{r}
+plot <- p03 + p01 + p02 + plot_layout(widths = c(1,6,2))
+```
+
+```{r}
+ggsave(plot=plot, file="pangenome_plot.png", width = 10, height = 7, units = "cm")
+```
+
+
+
+```{r}
+long_binarydf2 <- binarydf %>% pivot_longer(cols = !HOG, names_to = "strain", values_to = "X")
+
+long_binarydf2$strain <- gsub("_bakta", "", long_binarydf2$strain)
+
+long_binarydf2$strain <- factor(long_binarydf2$strain, levels = unique(z$strain))
+long_binarydf2$HOG <- factor(long_binarydf2$HOG, levels = unique(binarydf$HOG))
+long_binarydf2$X <- as.factor(long_binarydf2$X)
+
+```
+
+```{r}
+tax <- read.table("C:/Users/deani/Desktop/Specialeprojekt/gtdbtk.bac120.summary.tsv", header = T, sep = "\t") %>% separate(classification, into = c("rest", "species"), sep = "s__") %>% dplyr::select(user_genome, species)
+
+species <- data.frame(tree$tip.label)
+names(species) <- "user_genome"
+
+species <-left_join(species, tax, by="user_genome")
+species$user_genome <- factor(species$user_genome, levels = unique(z$strain))
+```
+
+
+
+```{r}
+p1 <- ggplot(long_binarydf2, aes(x=HOG, y=strain, fill=X)) +
+  geom_tile() +
+  scale_fill_manual(values = c("white", "pink"))
+```
+
+
+```{r}
+p2 <- ggplot(species, aes(x="1", y=user_genome, fill=species)) +
+  geom_tile(width=.1) +
+  theme_void()
+```
+```{r}
+p1 + p2
+```
+
+
+
+
+
+
+
+
+
+```{r}
+long_countdf <- countdf %>% pivot_longer(cols = !HOG, names_to = "strain", values_to = "X")
+long_countdf$strain <- gsub("_bakta", "", long_countdf$strain)
+
+long_countdf$strain <- factor(long_countdf$strain, levels = unique(taxonomy$order))
+long_countdf$HOG <- factor(long_countdf$HOG, levels = unique(binarydf$HOG))
+
+#long_countdf$Orthogroup <- gsub("OG", "", long_countdf$Orthogroup)
+#long_countdf$Orthogroup <- as.numeric(long_countdf$Orthogroup)
+#count_matrix <- as.matrix(countdf %>% select(!Orthogroup))
+#clust <- hclust(dist(t(count_matrix)))
+```
+
+
+```{r}
+ggplot(long_countdf, aes(x=HOG, y=strain, fill=cut(X, c(-1, 0, 1,Inf)))) +
+  geom_tile() +
+  scale_fill_manual(values = c("white", "pink", "magenta2"))
+  
+
+#+scale_x_discrete(limits = colnames(clust)[clust$order])+scale_y_discrete(expand = c(0,0))+geom_hline()
+```
+
+
+```{r}
+species3 <- species %>% dplyr::rename(strain = user_genome)
+```
+
+
+```{r}
+wide_countdf <- long_countdf %>% pivot_wider(names_from = HOG, values_from = X) %>% left_join(species3, by = "strain") %>% relocate(strain, species)
+```
+
+
+```{r}
+long_binary_species <- long_binarydf %>% left_join(species3, by="strain")
+```
+
+```{r}
+long_binary_species %>% filter(species == "Sphingomonas aerolata", X==0)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

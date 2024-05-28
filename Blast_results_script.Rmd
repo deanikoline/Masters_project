@@ -16,12 +16,13 @@ library("readxl")
 ```
 
 ```{r}
-setwd("C:/Users/deani/Desktop/Speciale")
+setwd("C:/Users/deani/Desktop/Specialeprojekt")
 getwd()
 ```
 ## Loading the results from the BLAST of ASV_1 against the strain collection
 
 ```{r}
+setwd("C:/Users/deani/Desktop/Specialeprojekt/BLASTresfiles")
 result <- read_tsv("ASV_1_blastres_all.tsv", col_names = F)
 head(result)
 ```
@@ -99,7 +100,7 @@ head(tax)
 
 ```{r}
 t <- c("domain", "phylum", "class", "order", "family", "genus", "species")
-taxon <- tax %>% select(user_genome, classification) %>% separate(classification, into = t, sep = ";") %>% rename("strain" = "user_genome")
+taxon <- tax %>% dplyr::select(user_genome, classification) %>% separate(classification, into = t, sep = ";") %>% dplyr::rename("strain" = "user_genome")
 taxon
 ```
 
@@ -124,13 +125,17 @@ print(paste("Percent sphingomonads: ", sphing/not_sphing*100))
 # Bar plot of genera in the strain collection
 
 ```{r}
-p2 <- ggplot(data=taxon, aes(x=genus, fill=species)) + geom_bar(stat="count", color = "black") + theme(legend.position="none") + theme(axis.text.x = element_text(angle = -70, hjust = 0)) + labs(x ='Genus', y='Counts', title = 'Taxonomy of the strain collection, coloured by species')
+#taxon$genus <- sub("g__", "", taxon$genus)
 
-#taxon_sort <-       # sorter så kun mest almindelige genus kommer med
-#p2.1 <- ggplot(data=taxon, aes(x=genus, fill=species)) + geom_bar(stat="count", color = "black") + theme(legend.position="none") + theme(axis.text.x = element_text(angle = -90, hjust = 0)) + labs(x ='Genus', y='Counts', title = 'Taxonomy of the strain collection, coloured by species')
+p2 <- ggplot(data=taxon, aes(x=genus)) +
+  geom_bar(stat="count", color = "black") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust = .4, size=15),
+        axis.title = element_text(size=15)) +
+  labs(x ='Genus', y='Number of isolates')
 
 p2
-#p2.1
+
 ```
 
 # Add taxonomy info to BLAST hit df
@@ -143,10 +148,23 @@ head(ndf)
 ## Colour histogram of hits by taxonomy
 
 ```{r}
-# histogram of identity coloured by genus
-p3 <- ggplot(ndf, aes(x=identity, fill=genus)) + geom_histogram(binwidth=1, color = "black") + scale_x_reverse() + labs(x ='% Identity', y='Number of hits', title = 'ASV_1 BLAST coloured by genus')
-p3
+ndf$genus <- sub("g__", "", ndf$genus)
+```
 
+
+```{r}
+# histogram of identity coloured by genus
+p3 <- ggplot(ndf, aes(x=identity, fill=genus)) +
+  theme_bw() +
+  geom_histogram(binwidth=1, colour="grey30") +
+  labs(x ='Percent identity', y='Number of isolates', fill="Genus") +
+  guides(fill=guide_legend(ncol=2)) +
+  theme(axis.title = element_text(size=12))
+p3
+```
+
+
+```{r}
 # bar plot of mismatches coloured by genus
 p3.2 <- ggplot(data=ndf, aes(x=mismatch, fill=genus)) +
   geom_bar(stat="count")
@@ -167,7 +185,7 @@ p4.2
 # Produce a list of sphingomonas genomes file names
 
 ```{r}
-sphingos <- filter(taxon, genus == "g__Sphingomonas") %>% mutate(file = paste0(strain, ".fasta")) %>% select(file)
+sphingos <- filter(taxon, genus == "g__Sphingomonas") %>% mutate(file = paste0(strain, ".fasta")) %>% dplyr::select(file)
 head(sphingos)
 write.table(sphingos, file = "sphingomonads.txt", sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE)
 ```
@@ -175,10 +193,32 @@ write.table(sphingos, file = "sphingomonads.txt", sep = "\t", row.names = FALSE,
 
 ```{r}
 ndf100 <- ndf %>% filter(identity == 100) %>% mutate(file = paste0(strain, ".fasta"))
-ndf100_list <- ndf100  %>% select(file)
+ndf100_list <- ndf100  %>% dplyr::select(file)
 dim(ndf100_list)
 write.table(ndf100_list, file = "no_mismatch_hits.txt", sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE)
 ```
+
+```{r}
+ndf1001 <- ndf100
+ndf1001$species <- sub("s__", "", ndf1001$species)
+ndf1001 <- ndf1001 %>% separate(species, into=c("gen", "species"), sep=" ")
+#ndf100$species <- sub("", "Unknown species", ndf100$species)
+```
+
+```{r}
+
+```
+
+```{r}
+ggplot(ndf100 %>% filter(!is.na(species))) +
+  geom_bar(aes(x=species)) +
+  theme_bw() +
+  labs(x ='Species', y='Number of isolates') +
+  theme(axis.title = element_text(size=14),
+        axis.text.x = element_text(angle = -90, hjust=0, vjust = .3, size=12))
+
+```
+
 
 ## Adding sequencing and assembly quality info
 

@@ -1,0 +1,229 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-04-02"
+---
+
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(RColorBrewer)
+library(ggnewscale)
+library(viridis)
+library(openxlsx)
+```
+
+
+
+```{r}
+setwd("C:/Users/deani/Desktop/Specialeprojekt")
+UV <- read.table("UV_resultater2.tsv", header = T, na.strings = "", sep = "\t")
+UV
+```
+
+
+```{r}
+UV <- UV %>% mutate(CFU = as.numeric(pmax(CFU2, CFU5, na.rm = T))) %>% mutate(total = CFU/dilution)
+```
+
+```{r}
+table <- UV %>% mutate(nr2 = paste0(nr, "_", rep)) %>% dplyr::select(nr2, dose, dilution, CFU) %>% pivot_wider(names_from = nr2, values_from = CFU)
+```
+
+```{r}
+deino
+```
+
+
+```{r}
+deino1 <- deino1 %>% dplyr::rename(total=Total)
+UV_plot1 <- rbind(UV, deino1)
+
+UV_plot1 <- UV_plot1 %>% mutate(nr = if_else(nr == 1, "E. coli", if_else(nr == 100, "D. radiodurans", as.character(nr)))) %>% mutate(total = total*100)
+
+plo <- ggplot(UV_plot1, aes(x=dose, y=total)) +
+  theme_bw() +
+  stat_summary(geom = "line", fun.y = "mean", colour="grey50") +
+  geom_point(size=2, aes(colour=as.factor(dilution))) +
+  labs(colour="Original dilution", x="UV dose (seconds)", y="Total CFU/mL") +
+  facet_wrap(~nr, scales = "free_y", ncol = 2) +
+  scale_x_continuous(breaks=c(0, 10, 20, 30, 60)) +
+  expand_limits(x = 0, y = 0)
+```
+
+
+```{r}
+suppressWarnings(print(plo))
+```
+
+
+
+
+```{r}
+write.xlsx(table, file = "UV_wide.xlsx")
+```
+
+
+
+```{r}
+no_UV <- UV %>% group_by(nr, dose) %>% summarise(no_uv_avg = mean(total, na.rm=T), no_uv_sd = sd(total, na.rm=T)) %>% filter(dose==0) %>% dplyr::select(!dose)
+```
+
+```{r}
+plot_UV <- UV %>%
+  left_join(no_UV, by="nr") %>%
+  mutate(survival=total/no_uv_avg) %>%
+  group_by(nr, dose) %>%
+  summarise(survival_mean = mean(survival, na.rm = T), survival_sd = sd(survival, na.rm=T)) %>%
+  mutate_all(~ifelse(is.nan(.), NA, .))
+```
+```{r}
+deino <- as.data.frame(cbind(c("D. radiodurans", "D. radiodurans", "D. radiodurans"), c(0, 30, 60), c(37, 26, 30), c(0,0,0), c(10^-3, 10^-3, 10^-3)))
+
+#deino_dilution = 10^-3
+
+names(deino) <- c("nr", "dose", "CFU", "survival_sd", "dilution")
+
+deino1 <- deino %>% dplyr::select(!survival_sd) %>% mutate(total = CFU/dilution)
+deino1["CFU2"] <- NA
+deino1["CFU5"] <- NA
+deino1["rep"] <- NA
+deino1["strain"] <- "D. radiodurans"
+
+deino$nr <- as.integer(deino$nr)
+deino$dose <- as.integer(deino$dose)
+
+deino <- deino %>% mutate(survival_mean = CFU/37) %>% dplyr::select(!c(CFU, dilution))
+
+plot_UV <- rbind(plot_UV,deino)
+```
+
+
+```{r}
+ggplot(data = remove_missing(plot_UV, na.rm = TRUE), aes(x = dose, y = survival_mean, na.rm = TRUE)) +
+  geom_point(size=1.8) +
+  geom_line(na.rm = TRUE) +
+  facet_wrap(~ nr, ncol = 2) +
+  scale_x_continuous(breaks=c(0, 10, 20, 30, 60))
+```
+
+```{r}
+UV_grouped1 <- UV %>%
+  group_by(nr, dose) %>%
+  mutate(CFU_mean = mean(total, na.rm = TRUE)) %>%
+  mutate(n=length(total)) %>%
+  mutate(CFU_sd = sd(total, na.rm = TRUE)) %>%
+  mutate(std_err = CFU_sd/sqrt(n)) %>%
+  mutate(alpha = 0.05) %>%
+  mutate(degrees_of_freedom = n - 1) %>%
+  mutate(t_score = qt(p=alpha/2, df=degrees_of_freedom,lower.tail=F)) %>%
+  mutate(margin_error = t_score * std_err)
+
+UV_grouped2 <- UV %>%
+  group_by(nr, dose, dilution) %>%
+  mutate(CFU_mean = mean(total, na.rm = TRUE)) %>%
+  mutate(n=length(total)) %>%
+  mutate(CFU_sd = sd(total, na.rm = TRUE)) %>%
+  mutate(std_err = CFU_sd/sqrt(n)) %>%
+  mutate(alpha = 0.05) %>%
+  mutate(degrees_of_freedom = n - 1) %>%
+  mutate(t_score = qt(p=alpha/2, df=degrees_of_freedom,lower.tail=F)) %>%
+  mutate(margin_error = t_score * std_err)
+
+```
+
+```{r}
+wide1 <- UV_grouped1 %>%
+  dplyr::select(nr, dose, CFU_mean, CFU_sd, std_err, margin_error) %>%
+  distinct(.keep_all = T)
+
+wide2 <- UV_grouped2 %>%
+  dplyr::select(nr, dose, CFU_mean, CFU_sd, std_err, margin_error) %>%
+  distinct(.keep_all = T)
+
+write.xlsx(wide1, file = "UV_wide2.xlsx")
+write.xlsx(wide2, file = "UV_wide3.xlsx")
+```
+
+
+```{r}
+plot1 <- ggplot(plot_UV, aes(x = dose, y = log(survival_mean))) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~ nr)
+
+plot2 <- ggplot(plot_UV, aes(x = dose, y = survival_mean, na.rm = TRUE)) +
+  geom_point() +
+  geom_line(na.rm = TRUE) +
+  facet_wrap(~ nr) +
+  scale_y_log10()
+
+plot3 <- ggplot(data = remove_missing(plot_UV, na.rm = TRUE), aes(x = dose, y = survival_mean, na.rm = TRUE)) +
+  geom_point() +
+  geom_line(na.rm = TRUE) +
+  facet_wrap(~ nr, ncol = 2) +
+  scale_y_log10()
+
+plot4 <- ggplot(plot_UV, aes(x = dose, y = survival_mean)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~ nr, ncol = 2) +
+  geom_errorbar(aes(ymin=survival_mean-survival_sd, ymax=survival_mean+survival_sd), width=.2,position=position_dodge(0.05))
+```
+```{r}
+plot_UV <- plot_UV %>% mutate(nr = if_else(nr == 1, "E. coli", if_else(nr == 100, "D. radiodurans", as.character(nr))))
+```
+
+
+```{r}
+plot3 <- ggplot(data = remove_missing(plot_UV, na.rm = TRUE), aes(x = dose, y = survival_mean, na.rm = TRUE)) +
+  geom_point(size=1.8) +
+  labs(x="UV dose (seconds)", y="Survival rate") +
+  theme_bw() +
+  geom_line(na.rm = TRUE) +
+  facet_wrap(~ nr, ncol = 2) +
+  scale_y_log10()+
+  scale_x_continuous(breaks=c(0, 10, 20, 30, 60))
+
+suppressWarnings(print(plot3))
+```
+
+
+
+```{r}
+
+
+
+
+grouped_UV <- UV %>% left_join(no_UV) %>% group_by(nr, dose) %>% mutate(avg = mean(total, na.rm=T)) %>% mutate(sd = sd(total, na.rm=T))
+```
+
+
+```{r}
+plot_df <- grouped_UV %>% group_by(nr, dose) %>% summarise(mean=mean(avg, na.rm=T)) %>% left_join(no_UV, by = "nr") %>% mutate(survival=mean/no_uv)
+```
+
+```{r}
+ggplot(plot_df) + geom_point(aes(x = dose, y = survival)) + geom_line(aes(x = dose, y = survival)) + facet_wrap(~ nr, scales="free_y")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

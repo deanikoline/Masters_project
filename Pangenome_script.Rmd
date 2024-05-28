@@ -1,0 +1,112 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-01-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+```
+
+```{r}
+pangenome_function <- function(orthogrps_file, genome_list_file) {
+  # Read data
+  orthogrps <- read_tsv(orthogrps_file, show_col_types = FALSE)
+  
+  # Read genome names to subset. If no genome list is provided, all genomes are included by default
+  if(missing(genome_list_file)) {
+    lines <- colnames(orthogrps[4:length(orthogrps)]) # Assumes first 3 columns aren't genomes
+  } else {
+    lines <- readLines(genome_list_file)
+  }
+  
+  # Define the pattern for extracting genome names
+  pattern <- "22.*-[0-9]{1,2}"
+  
+  genomes_list <- str_match(lines, pattern) # Extract the genome name from the list file to allow names with suffixes
+
+  # Create binary dataframe
+  binarydf <- orthogrps %>%
+    mutate(across(starts_with("22"), ~ ifelse(is.na(.), 0, 1))) %>% # Converts cells to 1 or 0 in columns with genome names
+    rename_with(~ str_extract(., pattern), matches(pattern)) # Renames columns containing genome names to that name, to remove any suffixes or prefixes
+
+  # Create subset dataframe
+  subset <- binarydf[, c("HOG", "OG", genomes_list), drop = FALSE]
+
+  # Calculate Total column
+  subset1 <- subset %>%
+    mutate(Total = rowSums(across(starts_with("22")) / length(grep(paste0("^", "22"), colnames(subset))))) %>%
+    select(HOG, Total) %>% filter(Total > 0)
+  
+
+  # Count genes in different categories
+  core <- dim(subset1 %>% filter(Total >= 0.95))[1]
+  #softcore <- dim(subset1 %>% filter(Total >= 0.95, Total < 0.99))[1]
+  shell <- dim(subset1 %>% filter(Total >= 0.15, Total < 0.95))[1]
+  cloud <- dim(subset1 %>% filter(Total > 0.0, Total < 0.15))[1]
+  total <- dim(subset1 %>% filter(Total != 0.0))[1]
+
+  # Print results
+  cat(paste0("Core genes: ", core, " (", round(core / total * 100, digits = 1), "%)\n"))
+  #cat(paste0("Soft core genes: ", softcore, " (", round(softcore / total * 100, digits = 1), "%)\n"))
+  cat(paste0("Shell genes: ", shell, " (", round(shell / total * 100, digits = 1), "%)\n"))
+  cat(paste0("Cloud genes: ", cloud, " (", round(cloud / total * 100, digits = 1), "%)\n"))
+  cat(paste0("Total genes: ", total, " (", round(total / total * 100, digits = 1), "%)\n"))
+
+  threshold1 <- 0.15
+  threshold2 <- 0.95
+  
+  subset1$Category <- cut(subset1$Total, breaks = c(-Inf, threshold1, threshold2, Inf),
+                     labels = c("Cloud", "Shell", "Core"), include.lowest = TRUE)
+  
+  category_counts <- table(subset1$Category)
+  
+  # Create the histogram plot
+  b <- length(lines) + 1 # Set histogram bins
+  
+  p1 <- ggplot(data = subset1, aes(x = Total*length(genomes_list), fill=Category)) + geom_histogram(colour="black", bins = b) +
+    #scale_x_reverse() +
+    scale_fill_manual(values = c("Cloud" = "white", "Shell" = "lightblue1", "Core" = "darkblue")) +
+    theme_classic() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    labs(title = "Distribution of the pan-genome", x = "Number of genomes", y = "Orthogroups") #+ annotate("text", x = length(genomes_list), y = -200, label = "Core", vjust = .5, hjust = .5) + annotate("text", x = 0, y = -200, label = "Cloud", vjust = .5, hjust = .5)
+  
+  # Create the pie chart data
+  
+  
+
+  
+  pie_data <- data.frame(Category = names(category_counts),
+                       count = as.numeric(category_counts))
+  
+  # Create the pie chart
+  p2 <- ggplot(data=pie_data, aes(x="", y=count, fill=Category)) +
+    scale_fill_manual(values = c("Cloud" = "white", "Shell" = "lightblue1", "Core" = "darkblue")) +
+    geom_bar(stat="identity", width=1, color="black") +
+    coord_polar("y", start=0) + theme_void() + theme(legend.position = "none")
+  
+  # Return the plots
+  return(list(p1, p2))
+}
+
+```
+
+```{r}
+#Example run
+pangenome_function("N0.tsv")
+```
+
+
+```{r}
+#Example run with a subset
+pangenome_function("N0.tsv", "aurantiaca_names.txt")
+```
+

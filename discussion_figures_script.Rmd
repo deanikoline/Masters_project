@@ -1,0 +1,674 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-05-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggtree)
+library(readxl)
+library(ape)
+```
+
+
+```{r}
+setwd("C:/Users/deani/Desktop/Specialeprojekt")
+
+#Load the tree
+genome_tree <- read.tree("new_genome_tree.nwk")
+genome_tree$tip.label <- sub(".ffn", "", genome_tree$tip.label)
+
+#Make a list of tips to remove to get the lab-tree
+labstrains <- read.table("42_strains.txt")
+allstrains <- as.data.frame(genome_tree$tip.label)
+names(labstrains) <- "strain"
+names(allstrains) <- "strain"
+labstrains$strain <- sub(" ", "", labstrains$strain)
+not_in_lab <- allstrains$strain[!allstrains$strain %in% labstrains$strain]
+
+#Load number IDs and change S1PEs name
+num_IDs <- read.table("strains_der_skal_op.tsv", header = T)
+num_IDs <- num_IDs %>%
+  dplyr::select(strain, ID)
+num_IDs$strain <- sub("22S1PE-3", "22S1PE", num_IDs$strain)
+
+#Initialise the lab tree
+lab_tree <- drop.tip(genome_tree, not_in_lab)
+lab_tree$tip.label <- sub("22S1PE-1", "22S1PE", lab_tree$tip.label)
+
+#Load species labels
+tax <- read_tsv("gtdbtk.bac120.summary.tsv", col_names = TRUE) %>%
+  dplyr::select(user_genome, classification) %>%
+  separate(classification, into = c("domain", "phylum", "class", "order", "family", "genus", "species"), sep = ";") %>%
+  dplyr::rename("strain" = "user_genome", "Species"="species") %>%
+  dplyr::select(strain, Species)
+tax$Species <- sub("s__", "", tax$Species)
+tax$strain <- sub("22S1PE-1", "22S1PE", tax$strain)
+
+#Make species heatmap data
+species_heatmap <- as.data.frame(lab_tree$tip.label) %>%
+  rename(strain = "lab_tree$tip.label") %>%
+  left_join(tax, by="strain") %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "strain")
+
+#Get phenotypedata
+phenotypes <- read_xlsx("phenotypes_final.xlsx") %>%
+  dplyr::rename(ID = Strain) %>%
+  left_join(num_IDs, by="ID")
+
+#Make antifungal phenotype heatmapdata
+antifungal_heatmap <- phenotypes %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "strain") %>%
+  dplyr::rename(graminearum = Fusarium, culmorum = Culmorum) %>%
+  dplyr::select(culmorum, graminearum, Zymoseptoria)
+
+#Make colour+antifungal phenotype heatmapdata
+colour_antifungal_heatmap <- phenotypes %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "strain") %>%
+  dplyr::select(Colour, Culmorum, Fusarium, Zymoseptoria)
+
+#Make colour phenotype heatmapdata
+colour_heatmap <- phenotypes %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "strain") %>%
+  dplyr::select(Colour)
+
+#Make motility slope phenotype heatmapdata
+motility_slope_heatmap <- phenotypes %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "strain") %>%
+  dplyr::select(Mot_slope) %>%
+  dplyr::rename(Slope = Mot_slope)
+motility_slope_heatmap$Slope <- as.numeric(motility_slope_heatmap$Slope)
+
+#Make motility group phenotype heatmapdata
+motility_group_heatmap <- phenotypes %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "strain") %>%
+  dplyr::select(Mot_group) %>%
+  dplyr::rename(Motility = Mot_group)
+
+#Load BLAST results
+allBLASTfiltered <- read.table("BLAST_goi/all_blastresults_filtered.tsv")
+names(allBLASTfiltered) <- c("qseqid", "sseqid", "pident", "length", "qlen", "slen", "mismatch", "gapopen", "qstart", "qend", "sstart", "send", "evalue", "bitscore", "strain")
+allBLASTfiltered <- allBLASTfiltered %>%
+  relocate(strain) %>%
+  separate(sseqid, into = c("Gene_name", "Gene_info"), sep = "_____")
+allBLASTfiltered$strain <- sub("22S1PE-1", "22S1PE", allBLASTfiltered$strain)
+
+#Get and add gene names
+gene_names <- read_xlsx("C:/Users/deani/Downloads/pnas.2211881119.sd01.xlsx", skip = 5) %>%
+  dplyr::select(Gene_name, Category)
+allBLASTfiltered <- allBLASTfiltered %>% left_join(gene_names, by = "Gene_name")
+
+#Add my own BLAST results with gene names
+newallBLASTfiltered <- read.table("all_new_blastresults_filtered.tsv")
+gene_names <- read_xlsx("BLAST_db.xlsx") %>%
+  dplyr::select(Gene, Category) %>%
+  dplyr::rename(gene=Gene)
+
+names(newallBLASTfiltered) <- c("qseqid", "sseqid", "pident", "length", "qlen", "slen", "mismatch", "gapopen", "qstart", "qend", "sstart", "send", "evalue", "bitscore", "strain")
+newallBLASTfiltered <-newallBLASTfiltered %>%
+  separate(sseqid, into = c("saccession", "sspecies", "gene"), sep="_")
+newallBLASTfiltered <- newallBLASTfiltered %>%
+  left_join(gene_names, by = "gene")
+newallBLASTfiltered$strain <- sub("22S1PE-1", "22S1PE", newallBLASTfiltered$strain)
+
+#AAP
+photosynthesis <- allBLASTfiltered %>%
+  filter(Category == "Anoxygenic Photosynthesis") %>%
+  arrange(desc(pident)) %>%
+  distinct(Gene_name, strain, .keep_all = T) %>%
+  arrange(strain) %>%
+  dplyr::select(strain, Gene_name, pident) %>%
+  pivot_wider(names_from = Gene_name, values_from = pident)
+photosynthesis <- as.data.frame(photosynthesis)
+photosynthesis <- photosynthesis %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "strain")
+
+#Carotenoids
+carot <- allBLASTfiltered %>%
+  filter(Category == "Carotenoid") %>%
+  arrange(desc(pident)) %>%
+  distinct(Gene_name, strain, .keep_all = T) %>%
+  arrange(strain) %>%
+  dplyr::select(strain, Gene_name, pident) %>%
+  pivot_wider(names_from = Gene_name, values_from = pident)
+carot <- as.data.frame(carot)
+carot <- carot %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "strain")
+
+#Flagellin
+flag <- allBLASTfiltered %>%
+  filter(Category == "Flagellin") %>%
+  arrange(desc(pident)) %>%
+  distinct(Gene_name, strain, .keep_all = T) %>%
+  arrange(strain) %>%
+  dplyr::select(strain, Gene_name, pident) %>%
+  pivot_wider(names_from = Gene_name, values_from = pident)
+flag <- as.data.frame(flag)
+flag <- flag %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "strain")
+
+#Type II secretion
+T2SS <- allBLASTfiltered %>%
+  filter(Category == "Type 2 Secretion System") %>%
+  arrange(desc(pident)) %>%
+  distinct(Gene_name, strain, .keep_all = T) %>%
+  arrange(strain) %>%
+  dplyr::select(strain, Gene_name, pident) %>%
+  pivot_wider(names_from = Gene_name, values_from = pident)
+T2SS <- as.data.frame(T2SS)
+T2SS <- T2SS %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "strain")
+
+#Type IV secretion
+T4SS <- allBLASTfiltered %>%
+  filter(Category == "Type 4 Secretion System") %>%
+  arrange(desc(pident)) %>%
+  distinct(Gene_name, strain, .keep_all = T) %>%
+  arrange(strain) %>%
+  dplyr::select(strain, Gene_name, pident) %>%
+  pivot_wider(names_from = Gene_name, values_from = pident)
+T4SS <- as.data.frame(T4SS)
+T4SS <- T4SS %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "strain")
+
+#Type VI secretion
+T6SS <- allBLASTfiltered %>%
+  filter(Category == "Type 6 Secretion System") %>%
+  arrange(desc(pident)) %>%
+  distinct(Gene_name, strain, .keep_all = T) %>%
+  arrange(strain) %>%
+  dplyr::select(strain, Gene_name, pident) %>%
+  pivot_wider(names_from = Gene_name, values_from = pident)
+T6SS <- as.data.frame(T6SS)
+T6SS <- T6SS %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "strain")
+
+#DNA repair
+repair <- newallBLASTfiltered %>%
+  filter(Category == "repair") %>%
+  arrange(desc(pident)) %>%
+  distinct(gene, strain, .keep_all = T) %>%
+  arrange(strain) %>%
+  dplyr::select(strain, gene, pident) %>%
+  pivot_wider(names_from = gene, values_from = pident)
+repair <- as.data.frame(repair)
+repair <- repair %>%  remove_rownames() %>% column_to_rownames(var = "strain")
+
+#Get biosynthetic gene clusters
+BGCs <- read.table("bigscape_260224_networks/network_annotations.tsv", sep="\t", header = T) %>%
+  separate(BGC_name, into = c("region", "strain"), sep="_") %>%
+  relocate(strain)
+BGCs$strain <- sub("22S1PE-1", "22S1PE", BGCs$strain)
+
+#Define the replace NA function (idk)
+replace_NA_Y <- function(x) {
+  ifelse(is.na(x), "N", "Y")
+}
+
+#Create BGC heatmap data
+BGC_heatmap <- BGCs %>%
+  dplyr::select(strain, Product.Prediction) %>%
+  group_by(strain) %>%
+  count(Product.Prediction) %>%
+  mutate(n = as.character(n)) %>%
+  pivot_wider(names_from = Product.Prediction, values_from = n) %>%
+  mutate_at(vars(-1), ~replace_NA_Y(.))
+BGC_heatmap <- as.data.frame(BGC_heatmap) #%>% distinct(strain, .keep_all = T)
+BGC_heatmap <- BGC_heatmap %>% remove_rownames() %>% column_to_rownames(var = "strain")
+
+colnames(BGC_heatmap) <- sub("oligosaccharide.RiPP-like", "oligosaccharide RiPP",
+                             colnames(BGC_heatmap))
+colnames(BGC_heatmap) <- sub("lassopeptide.RRE-containing", "lassopeptide RRE",
+                             colnames(BGC_heatmap))
+```
+
+```{r}
+# Create the figure of the lab tree
+p1 <- ggtree(lab_tree) %<+% num_IDs +
+  geom_tiplab(aes(label=ID), align = T, size=3) +
+  geom_treescale(x=2, y=1, offset=2)
+
+# And the circular version
+p2 <- ggtree(lab_tree, layout = "circular", branch.length = "none")
+```
+
+```{r}
+# Circular tree with species labels and phenotypic data
+h1 <- gheatmap(p2, species_heatmap,
+         width = 0.15,
+         colnames_angle=-40,
+         font.size = 2,
+         hjust=.2) +
+  scale_fill_viridis_d(option="D", name="Species", na.value="grey95") +
+  theme(legend.position = "bottom")
+
+h2 <- h1 + new_scale_fill()
+
+h3 <- gheatmap(h2, colour_heatmap,
+               width = .15,
+               offset = 2.6,
+               colnames_angle=-40,
+               font.size = 2,
+               hjust = .25) +
+  scale_fill_manual(name = "Colony colour",
+                    values = c("orange", "lightgoldenrod1", "white", "lightcyan"),
+                    breaks = c("Red", "Yellow", "White", "Colourless"),
+                    labels = c("orange", "yellow", "white", "colourless")) +
+  theme(legend.position = "bottom",
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.box = "vertical", legend.margin = margin())
+
+h4 <- h3 + new_scale_fill()
+
+h5 <- gheatmap(h4,
+         antifungal_heatmap,
+         width = .3,
+         colnames_angle=-40,
+         font.size = 2,
+         hjust = 0.2,
+         offset = 5.2,
+         color = "white") +
+  scale_fill_manual(name = "Fungal inhibition",
+                    values = c("black", "grey97"),
+                    breaks = c("YES", "NO"),
+                    labels = c("Inhibition", "No inhibition")) +
+  theme(legend.position = "right",
+        legend.text = element_text(size=6),
+        legend.title = element_text(size=7),
+        legend.key.size = unit(.3, 'cm'))
+
+```
+
+```{r}
+suppressWarnings(print(h5))
+ggsave(plot=h5, file="forside.png", height = 14.6, width = 23.4, units = "cm")
+```
+
+
+```{r}
+# Figure 56
+h <- gheatmap(p1, species_heatmap, 
+               offset = .1,
+               width = .3,
+               color="white",
+               colnames_angle=-90,
+              font.size = 2.8,
+              hjust = 0) +
+  scale_fill_viridis_d(option="D", name="Species", na.value="grey95")
+
+h0 <- h + new_scale_fill()
+
+h1 <- gheatmap(h0,
+         antifungal_heatmap,
+         width = .8,
+         colnames_angle=-90,
+         font.size = 2.8,
+         hjust = 0,
+         offset = .23,
+         color = "white") +
+  scale_fill_manual(name = "Phenotype",
+                    values = c("black", "grey92"),
+                    breaks = c("YES", "NO"),
+                    labels = c("Inhibition", "No inhibition")) +
+  theme(legend.position = "right",
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 7),
+        legend.key.size = unit(.4, 'cm'),
+        legend.box = "vertical", legend.margin = margin()) +
+  scale_y_continuous(expand=c(0, 10))
+
+h2 <- h1 + new_scale_fill()
+
+h3 <- gheatmap(h2, T2SS,  width=.5, colnames = F, font.size = 2, offset = .58, color = FALSE)
+
+h4 <- gheatmap(h3, T4SS,  width=.5, colnames = F, font.size = 2, offset = .785, color = FALSE)
+
+h5 <- gheatmap(h4, T6SS, width=.5, colnames = F, font.size = 2, offset = .985, color = FALSE) +
+  scale_fill_viridis(name = "BLAST hit identity", option = "A", direction = -1, na.value="#FCFDBFFF")+
+  scale_y_continuous(expand=c(0, 10)) 
+```
+
+```{r}
+h5
+
+ggsave(plot=h5, file="fungal_secretion.png", width = 9, height = 7, units = "in")
+```
+
+
+
+```{r}
+# Figure 55
+h <- gheatmap(p1, species_heatmap, 
+               offset = .1,
+               width = .4,
+               color="white",
+               colnames_angle=-90,
+              font.size = 4,
+              hjust = 0) +
+  scale_fill_viridis_d(option="D", name="Species", na.value="grey95")
+
+h0 <- h + new_scale_fill()
+
+h1 <- gheatmap(h0, colour_heatmap,
+               width = .4,
+               colnames_angle=-90,
+               font.size = 4,
+               offset = .3,
+               hjust = 0) +
+  scale_fill_manual(name = "Phenotype",
+                    values = c("orange", "lightgoldenrod1", "white", "lightcyan"),
+                    breaks = c("Red", "Yellow", "White", "Colourless"),
+                    labels = c("orange", "yellow", "white", "colourless")) +
+  theme(legend.position = "bottom",
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.box = "vertical", legend.margin = margin())+ 
+    scale_y_continuous(expand=c(0, 15))
+
+h2 <- h1 + new_scale_fill()
+
+h3 <- gheatmap(h2,
+         antifungal_heatmap,
+         width = .8,
+         colnames_angle=-90,
+         font.size = 4,
+         hjust = 0,
+         offset = .5,
+         color = "white") +
+  scale_fill_manual(name = "Phenotype",
+                    values = c("black", "grey92"),
+                    breaks = c("YES", "NO"),
+                    labels = c("Inhibition", "No inhibition")) +
+  theme(legend.position = "right",
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 7),
+        legend.key.size = unit(.4, 'cm'),
+        legend.box = "vertical", legend.margin = margin()) +
+  scale_y_continuous(expand=c(0, 10))
+
+h4 <- h3 + new_scale_fill()
+
+h5 <- gheatmap(h4, BGC_heatmap,
+               colnames_angle=-90,
+               font.size = 4,
+               hjust = 0,
+               width = 3.5,
+               offset = .8) +
+  scale_fill_manual(name = "BGC content",
+                    values = c("darkblue", "grey95"),
+                    breaks = c("Y", "N"),
+                    labels = c("contains", "doesn't contain")) +
+  theme(legend.position = "right",
+        legend.title = element_text(size = 10),
+        legend.text = element_text(size = 9),
+        legend.key.size = unit(.4, 'cm'),
+        legend.box = "vertical", legend.margin = margin()) + 
+    scale_y_continuous(expand=c(0, 16.5))
+```
+
+```{r}
+h5
+```
+
+
+```{r}
+h <- gheatmap(p1, species_heatmap, 
+               offset = .1,
+               width = .4,
+               color="white",
+               colnames_angle=-90,
+              colnames = F,
+              font.size = 4,
+              hjust = 0) +
+  scale_fill_viridis_d(option="D", name="Species", na.value="grey95")
+
+h0 <- h + new_scale_fill()
+
+h1 <- gheatmap(h0, colour_heatmap,
+               width = .4,
+               colnames_angle=-90,
+               colnames = F,
+               font.size = 4,
+               offset = .3,
+               hjust = 0) +
+  scale_fill_manual(name = "Phenotype",
+                    values = c("orange", "lightgoldenrod1", "white", "lightcyan"),
+                    breaks = c("Red", "Yellow", "White", "Colourless"),
+                    labels = c("orange", "yellow", "white", "colourless")) +
+  theme(legend.position = "bottom",
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.box = "vertical", legend.margin = margin())+ 
+    scale_y_continuous(expand=c(0, 15))
+
+h2 <- h1 + new_scale_fill()
+
+h3 <- gheatmap(h2,
+         antifungal_heatmap,
+         width = .8,
+         colnames_angle=-90,
+         colnames = F,
+         font.size = 4,
+         hjust = 0,
+         offset = .5,
+         color = "white") +
+  scale_fill_manual(name = "Phenotype",
+                    values = c("black", "grey92"),
+                    breaks = c("YES", "NO"),
+                    labels = c("Inhibition", "No inhibition")) +
+  theme(legend.position = "right",
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 7),
+        legend.key.size = unit(.4, 'cm'),
+        legend.box = "vertical", legend.margin = margin()) +
+  scale_y_continuous(expand=c(0, 10))
+
+h4 <- h3 + new_scale_fill()
+
+h5 <- gheatmap(h4, BGC_heatmap,
+               colnames_angle=-90,
+               font.size = 4,
+               colnames = F,
+               hjust = 0,
+               width = 3.5,
+               offset = .8) +
+  scale_fill_manual(name = "BGC content",
+                    values = c("darkblue", "grey95"),
+                    breaks = c("Y", "N"),
+                    labels = c("contains", "doesn't contain")) +
+  theme(legend.position = "right",
+        legend.title = element_text(size = 10),
+        legend.text = element_text(size = 9),
+        legend.key.size = unit(.4, 'cm'),
+        legend.box = "vertical", legend.margin = margin())
+```
+
+```{r}
+h5
+
+ggsave(plot= h5, filename = "fungal_plot.png", width=21, units="cm")
+```
+
+```{r}
+# Figure 52
+h <- gheatmap(p1, species_heatmap, 
+               offset = .1,
+               width = .4,
+               color="white",
+               colnames_angle=-90,
+              font.size = 3,
+              hjust = 0) +
+  scale_fill_viridis_d(option="D", name="Species", na.value="grey95")
+
+h0 <- h + new_scale_fill()
+
+h1 <- gheatmap(h0, colour_heatmap,
+               width = .4,
+               colnames_angle=-90,
+               font.size = 3,
+               offset = .3,
+               hjust = 0) +
+  scale_fill_manual(name = "Phenotype",
+                    values = c("orange", "lightgoldenrod1", "white", "lightcyan"),
+                    breaks = c("Red", "Yellow", "White", "Colourless"),
+                    labels = c("orange", "yellow", "white", "colourless")) +
+  theme(legend.position = "bottom",
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 7),
+        legend.key.size = unit(.4, 'cm'),
+        legend.margin = margin())+ 
+    scale_y_continuous(expand=c(0, 10))
+
+h2 <- h1 + new_scale_fill()
+
+h3 <- gheatmap(h2, photosynthesis,
+               width=.5,
+               colnames = F,
+               font.size = 2,
+               offset = .58,
+               color = FALSE)
+
+h4 <- gheatmap(h3, carot,
+               width=.5,
+               colnames = F,
+               font.size = 2,
+               offset = .785,
+               color = FALSE)
+
+h5 <- gheatmap(h4, repair,
+               width=.5,
+               colnames = F,
+               font.size = 2,
+               offset = .985,
+               color = FALSE) +
+  scale_fill_viridis(name = "BLAST hit identity",
+                     option = "A",
+                     direction = -1,
+                     na.value="#FCFDBFFF")+
+  scale_y_continuous(expand=c(0, 10)) 
+```
+
+
+```{r}
+h5
+ggsave(plot=h5, file="fig52.png", width = 9, height = 7, units = "in")
+```
+
+
+```{r}
+h <- gheatmap(p1, species_heatmap, 
+               offset = .1,
+               width = .3,
+               color="white",
+               colnames_angle=-90,
+              font.size = 2.8,
+              hjust = 0) +
+  scale_fill_viridis_d(option="D", name="Species", na.value="grey95")
+
+h0 <- h + new_scale_fill()
+
+h1 <- gheatmap(h0, motility_slope_heatmap,
+         offset = .25,
+         colnames_angle=-90,
+         font.size = 2.8,
+         hjust=0,
+         width=.3) +
+  scale_fill_distiller(type = "seq",
+                       trans = "reverse",
+                        palette = "Greys")
+
+h2 <- h1 + new_scale_fill()
+
+h3 <- gheatmap(h2, flag,
+               width=.5,
+               colnames = F,
+               font.size = 2,
+               offset = .45,
+               color = FALSE) +
+  scale_fill_viridis(name = "BLAST hit identity",
+                     option = "A",
+                     direction = -1,
+                     na.value="#FCFDBFFF")+
+  scale_y_continuous(expand=c(0, 10)) 
+```
+
+```{r}
+h3
+```
+
+```{r}
+# Figure 58
+h <- gheatmap(p1, species_heatmap, 
+               offset = .1,
+               width = .3,
+               color="white",
+               colnames_angle=-90,
+              font.size = 2.8,
+              hjust = 0) +
+  scale_fill_viridis_d(option="D", name="Species", na.value="grey95")
+
+h0 <- h + new_scale_fill()
+
+h1 <- gheatmap(h0, motility_group_heatmap,
+         offset = .25,
+         colnames_angle=-90,
+         font.size = 2.8,
+         hjust=0,
+         width=.3) +
+  scale_fill_manual(name = "Base motility category",
+                    values = c("grey92", "grey40", "grey20"),
+                    breaks = c("Sessile", "Average", "Fast"),
+                    labels = c("Sessile", "Average", "Fast"))
+
+h2 <- h1 + new_scale_fill()
+
+h3 <- gheatmap(h2, flag,
+               width=.5,
+               colnames = F,
+               font.size = 2,
+               offset = .45,
+               color = FALSE) +
+  scale_fill_viridis(name = "BLAST hit identity",
+                     option = "A",
+                     direction = -1,
+                     na.value="#FCFDBFFF")+
+  theme(legend.position = "right",
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 7),
+        legend.key.size = unit(.4, 'cm'),
+        legend.margin = margin()) +
+  scale_y_continuous(expand=c(0, 10)) 
+```
+
+
+
+```{r}
+h3
+ggsave(plot=h3, file="fig58.png", width = 9, height = 7, units = "in")
+```
+
+
+
+
+
+
+
+
